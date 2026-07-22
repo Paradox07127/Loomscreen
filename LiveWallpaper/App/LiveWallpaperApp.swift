@@ -173,8 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             globalShortcutManager?.start()
         }
 
-        if !runtimeOptions.isTesting,
-           manager.featureCatalog.isEnabled(.agentFleet) {
+        if !runtimeOptions.isTesting {
             MonitorHUDController.shared.focusHandler = { MonitorFocusRouter.focus(sessionID: $0) }
             MonitorHUDController.shared.applyPersistedStateAtStartup()
         }

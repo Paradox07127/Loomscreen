@@ -816,7 +816,6 @@ private func memoryPreviewContext(
         history: history,
         placement: MonitorWidgetPlacement(kind: .memory, size: size, options: options),
         isEditing: false,
-        isAgentFleetEnabled: false,
         reduceMotion: false,
         now: Date()
     )

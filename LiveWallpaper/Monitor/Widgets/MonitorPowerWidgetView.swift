@@ -408,7 +408,6 @@ private func powerContext(_ system: MonitorSystemSnapshot?, size: MonitorWidgetS
         history: MonitorHistorySnapshot(),
         placement: MonitorWidgetPlacement(kind: .power, size: size),
         isEditing: false,
-        isAgentFleetEnabled: false,
         reduceMotion: false,
         now: Date()
     )

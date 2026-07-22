@@ -46,7 +46,6 @@ final class MonitorBoardHostView: NSView {
     init(
         frame frameRect: NSRect,
         configuration: MonitorBoardConfiguration,
-        agentFleetEnabled: Bool,
         nameOnlyTiles: Bool = false,
         topInsetFraction: CGFloat = 0,
         referenceWidth: CGFloat = 0
@@ -56,10 +55,7 @@ final class MonitorBoardHostView: NSView {
         self.nameOnlyTiles = nameOnlyTiles
         self.reduceMotion = reduceMotion
         self.dataModel = MonitorBoardDataModel()
-        self.interactionModel = MonitorBoardInteractionModel(
-            configuration: configuration,
-            isAgentFleetEnabled: agentFleetEnabled
-        )
+        self.interactionModel = MonitorBoardInteractionModel(configuration: configuration)
         let container = MonitorBoardRootContainer(
             model: interactionModel,
             data: dataModel,

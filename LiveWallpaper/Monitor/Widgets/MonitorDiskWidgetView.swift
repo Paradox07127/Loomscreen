@@ -538,7 +538,6 @@ private func diskMockContext(size: MonitorWidgetSize) -> MonitorWidgetContext {
         history: history,
         placement: MonitorWidgetPlacement(kind: .disk, size: size),
         isEditing: false,
-        isAgentFleetEnabled: false,
         reduceMotion: false,
         now: Date()
     )

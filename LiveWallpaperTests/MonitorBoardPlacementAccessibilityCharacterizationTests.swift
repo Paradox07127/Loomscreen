@@ -326,8 +326,7 @@ struct MonitorBoardPlacementAccessibilityCharacterizationTests {
                 refreshHz: 1.5,
                 mouseInteractionEnabled: true,
                 reduceMotionOverride: false
-            ),
-            isAgentFleetEnabled: true
+            )
         )
         model.boardSize = boardSize
         model.setEditing(true)

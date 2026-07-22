@@ -18,10 +18,8 @@ public enum ProductFeature: String, Sendable, Hashable, Codable, CaseIterable {
     case metalShader
     case scene
 
-    /// System-metrics dashboard wallpaper available in both SKUs; AI-agent modules use `.agentFleet` separately.
+    /// Monitor wallpaper, AI-agent modules included; both SKUs.
     case monitorWallpaper
-    /// Pro-only AI-agent sessions and usage modules within the monitor wallpaper.
-    case agentFleet
 
     case wpeImport
     case videoEffects
@@ -85,7 +83,7 @@ public struct ProductCapabilities: Sendable, Equatable {
         sku: .pro,
         enabledFeatures: [
             .video, .html, .metalShader, .scene,
-            .monitorWallpaper, .agentFleet,
+            .monitorWallpaper,
             .wpeImport, .videoEffects, .weatherReactive,
             .scheduleAutomation, .playlists,
             .systemMonitor, .globalShortcuts,

@@ -1082,7 +1082,6 @@ private func usagePreviewContext(
         history: history,
         placement: MonitorWidgetPlacement(kind: .usage, size: size),
         isEditing: false,
-        isAgentFleetEnabled: true,
         reduceMotion: false,
         now: Date()
     )

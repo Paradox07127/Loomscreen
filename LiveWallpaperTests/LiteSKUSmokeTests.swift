@@ -29,7 +29,6 @@ struct LiteSKUSmokeTests {
         #expect(capabilities.enabledFeatures.contains(.videoEffects))
         #expect(capabilities.enabledFeatures.contains(.weatherReactive))
         #expect(capabilities.enabledFeatures.contains(.monitorWallpaper))
-        #expect(!capabilities.enabledFeatures.contains(.agentFleet))
         #expect(!capabilities.enabledFeatures.contains(.wpeImport))
         #expect(!capabilities.enabledFeatures.contains(.developerTools))
     }

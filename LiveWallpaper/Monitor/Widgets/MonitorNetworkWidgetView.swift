@@ -457,7 +457,6 @@ private func networkPreviewContext(size: MonitorWidgetSize) -> MonitorWidgetCont
         history: history,
         placement: MonitorWidgetPlacement(kind: .network, size: size),
         isEditing: false,
-        isAgentFleetEnabled: false,
         reduceMotion: false,
         now: Date()
     )

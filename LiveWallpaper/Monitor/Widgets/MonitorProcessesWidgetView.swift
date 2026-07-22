@@ -339,7 +339,6 @@ private func processesMockContext(
         history: MonitorHistorySnapshot(),
         placement: MonitorWidgetPlacement(kind: .processes, size: size, options: options),
         isEditing: false,
-        isAgentFleetEnabled: false,
         reduceMotion: false,
         now: Date()
     )

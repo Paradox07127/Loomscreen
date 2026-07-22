@@ -607,7 +607,6 @@ private func aiEnginePreviewContext(
         history: MonitorHistorySnapshot(),
         placement: MonitorWidgetPlacement(kind: .aiEngine, size: size),
         isEditing: false,
-        isAgentFleetEnabled: false,
         reduceMotion: false,
         now: Date()
     )

@@ -9,7 +9,6 @@ struct MonitorWidgetContext {
     var history: MonitorHistorySnapshot
     var placement: MonitorWidgetPlacement
     var isEditing: Bool
-    var isAgentFleetEnabled: Bool
     var reduceMotion: Bool
     var now: Date
 }

@@ -146,8 +146,7 @@ struct ScreenDetailPreviewArea: View {
     private var monitorContent: some View {
         MonitorBoardPreviewArea(
             screen: screen,
-            screenManager: screenManager,
-            featureCatalog: featureCatalog
+            screenManager: screenManager
         )
         .padding(24)
     }

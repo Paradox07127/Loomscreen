@@ -22,15 +22,13 @@ extension ScreenManager {
             self?.persistMonitorOverlayBoard(board, screenID: screenID)
         }
         MonitorOverlayController.shared.retainOnly(Set(screens.map(\.id)))
-        let agentFleetEnabled = featureCatalog.isEnabled(.agentFleet)
         for screen in screens {
             let overlay = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.monitorOverlay
             let frame = displayRegistry.findNSScreen(for: screen.id)?.frame ?? screen.frame
             MonitorOverlayController.shared.apply(
                 overlay: overlay,
                 screenID: screen.id,
-                screenFrame: frame,
-                agentFleetEnabled: agentFleetEnabled
+                screenFrame: frame
             )
         }
         // Re-apply after retain/apply so the decision covers the final host set.
@@ -289,14 +287,13 @@ extension ScreenManager {
         case .monitor(let monitorConfig):
             session = ambientSessionBuilder.makeMonitorSession(
                 monitorConfig,
-                agentFleetEnabled: featureCatalog.isEnabled(.agentFleet),
                 frame: screen.frame,
                 onConfigurationEdited: { [weak self, weak screen] edited in
                     guard let self, let screen else { return }
                     self.persistMonitorConfigurationFromBoard(edited, for: screen)
                 }
             )
-            Logger.info("Set monitor wallpaper for screen \(screen.id) [agentFleet=\(featureCatalog.isEnabled(.agentFleet))]", category: .screenManager)
+            Logger.info("Set monitor wallpaper for screen \(screen.id)", category: .screenManager)
         case .video:
             return
         }

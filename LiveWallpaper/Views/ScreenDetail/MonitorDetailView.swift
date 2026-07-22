@@ -24,10 +24,6 @@ struct MonitorDetailView: View {
     /// Display-only temperature unit for every sensor readout (app-wide, not per-board).
     @AppStorage(MonitorTemperature.fahrenheitDefaultsKey) private var temperatureFahrenheit = false
 
-    private var agentFleetEnabled: Bool {
-        featureCatalog.isEnabled(.agentFleet)
-    }
-
     var body: some View {
         GroupBox {
             CollapsibleSection(
@@ -48,13 +44,10 @@ struct MonitorDetailView: View {
                     placedWidgetsSection
                     Divider()
                     layoutManagementRow
-
-                    if agentFleetEnabled {
-                        Divider()
-                        usageSetupRow
-                        Divider()
-                        authorizationRows
-                    }
+                    Divider()
+                    usageSetupRow
+                    Divider()
+                    authorizationRows
                 }
             }
         }
@@ -279,7 +272,7 @@ struct MonitorDetailView: View {
         }
     }
 
-    // MARK: - AI-agent surfaces (Pro-gated)
+    // MARK: - AI-agent surfaces
 
     private var usageSetupRow: some View {
         SettingRow(

@@ -19,15 +19,6 @@ public enum MonitorWidgetKind: String, Codable, Sendable, CaseIterable, Identifi
 
     public var id: String { rawValue }
 
-    /// Kinds that surface AI-agent data; the renderer hard-gates these off
-    /// unless the injected `FeatureCatalog` enables `.agentFleet` (Pro).
-    public var requiresAgentFleet: Bool {
-        switch self {
-        case .usage, .fleet: return true
-        default: return false
-        }
-    }
-
     /// Grid footprint in cells. The renderer's cell pitch reproduces Apple's
     /// official macOS widget frames: S(1×1)=170×170, M(2×1)=364×170,
     /// L(2×2)=364×376 pt.

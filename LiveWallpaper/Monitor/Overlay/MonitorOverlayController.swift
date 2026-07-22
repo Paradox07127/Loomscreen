@@ -81,10 +81,8 @@ final class MonitorOverlayController: NSObject {
     private final class Host {
         let window: MonitorOverlayWindow
         let board: MonitorBoardHostView
-        /// The gated board currently shown (never carries agent widgets when the
-        /// catalog is locked) — drives the union sampling options.
+        /// The board currently shown — drives the union sampling options.
         var config: MonitorBoardConfiguration
-        var agentFleetEnabled: Bool
         var level: MonitorOverlayLevel
         var isVisible = false
         var isDeliveringSnapshots = false
@@ -93,13 +91,11 @@ final class MonitorOverlayController: NSObject {
             window: MonitorOverlayWindow,
             board: MonitorBoardHostView,
             config: MonitorBoardConfiguration,
-            agentFleetEnabled: Bool,
             level: MonitorOverlayLevel
         ) {
             self.window = window
             self.board = board
             self.config = config
-            self.agentFleetEnabled = agentFleetEnabled
             self.level = level
         }
     }
@@ -149,24 +145,21 @@ final class MonitorOverlayController: NSObject {
     func apply(
         overlay: MonitorOverlayConfiguration?,
         screenID: CGDirectDisplayID,
-        screenFrame: NSRect,
-        agentFleetEnabled: Bool
+        screenFrame: NSRect
     ) {
         guard let overlay, overlay.enabled else {
             teardown(screenID: screenID)
             return
         }
 
-        let gated = MonitorWallpaperView.gatedConfiguration(overlay.board, agentFleetEnabled: agentFleetEnabled)
         let topInsetFraction = MonitorWallpaperView.menuBarTopInsetFraction(forFrame: screenFrame)
 
         if let host = hosts[screenID] {
-            host.agentFleetEnabled = agentFleetEnabled
-            host.config = gated
+            host.config = overlay.board
             host.level = overlay.level
             host.window.applyFrame(screenFrame)
             host.window.apply(level: overlay.level)
-            host.board.apply(configuration: gated, topInsetFraction: topInsetFraction)
+            host.board.apply(configuration: overlay.board, topInsetFraction: topInsetFraction)
             updateInteractive(host)
             reconcileVisibilityAndRuntime()
             return
@@ -177,8 +170,7 @@ final class MonitorOverlayController: NSObject {
         let window = MonitorOverlayWindow(screenFrame: screenFrame, level: overlay.level)
         let board = MonitorBoardHostView(
             frame: NSRect(origin: .zero, size: screenFrame.size),
-            configuration: gated,
-            agentFleetEnabled: agentFleetEnabled,
+            configuration: overlay.board,
             topInsetFraction: topInsetFraction
         )
         board.autoresizingMask = [.width, .height]
@@ -190,16 +182,14 @@ final class MonitorOverlayController: NSObject {
         let host = Host(
             window: window,
             board: board,
-            config: gated,
-            agentFleetEnabled: agentFleetEnabled,
+            config: overlay.board,
             level: overlay.level
         )
         hosts[screenID] = host
 
         board.onConfigurationEdited = { [weak self, weak host] edited in
             guard let self, let host else { return }
-            let regated = MonitorWallpaperView.gatedConfiguration(edited, agentFleetEnabled: host.agentFleetEnabled)
-            host.config = regated
+            host.config = edited
             onOverlayEdited?(screenID, edited)
             reconcileVisibilityAndRuntime()
         }
@@ -312,19 +302,17 @@ final class MonitorOverlayController: NSObject {
 
     private func makeOptions(visibleHostIDs: Set<CGDirectDisplayID>) -> MonitorRuntimeOptions {
         var kinds: Set<MonitorWidgetKind> = []
-        var anyAgentFleet = false
         var gpuSeconds: Double?
         for (screenID, host) in hosts where visibleHostIDs.contains(screenID) {
             kinds.formUnion(host.config.widgets.map(\.kind))
-            anyAgentFleet = anyAgentFleet || host.agentFleetEnabled
             if let s = MonitorWidgetDraft.gpuSampleSeconds(in: host.config.widgets) {
                 gpuSeconds = min(gpuSeconds ?? s, s)
             }
         }
         return MonitorRuntimeOptions(
             system: MonitorWallpaperView.requiresSystemMetrics(for: kinds),
-            agents: anyAgentFleet && kinds.contains(.fleet),
-            usage: anyAgentFleet && kinds.contains(.usage),
+            agents: kinds.contains(.fleet),
+            usage: kinds.contains(.usage),
             topProcesses: kinds.contains(.processes),
             activeWidgetKinds: kinds,
             gpuSampleSeconds: gpuSeconds

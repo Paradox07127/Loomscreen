@@ -195,7 +195,6 @@ struct MonitorBoardRootView: View {
                     history: history.current,
                     placement: placement,
                     isEditing: model.isEditing,
-                    isAgentFleetEnabled: model.isAgentFleetEnabled,
                     reduceMotion: reduceMotion,
                     now: now
                 ),

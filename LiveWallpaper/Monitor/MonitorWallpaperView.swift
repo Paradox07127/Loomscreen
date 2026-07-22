@@ -10,8 +10,6 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
     private let boardHost: MonitorBoardHostView
     private var configuration: MonitorBoardConfiguration
-    /// Whether the injected feature catalog unlocks the AI-agent modules.
-    private let agentFleetEnabled: Bool
 
     /// Mirrors `configuration.mouseInteractionEnabled`; when false the wallpaper stays click-through.
     private var allowMouseInteraction: Bool
@@ -37,19 +35,15 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     init(
         frame frameRect: NSRect,
         configuration: MonitorBoardConfiguration,
-        agentFleetEnabled: Bool,
         runtime: MonitorRuntime = .shared
     ) {
-        self.agentFleetEnabled = agentFleetEnabled
         self.runtime = runtime
         self.runtimeLeaseSlot = runtime.makeLeaseSlot()
-        let gated = Self.gatedConfiguration(configuration, agentFleetEnabled: agentFleetEnabled)
-        self.configuration = gated
-        self.allowMouseInteraction = gated.mouseInteractionEnabled
+        self.configuration = configuration
+        self.allowMouseInteraction = configuration.mouseInteractionEnabled
         self.boardHost = MonitorBoardHostView(
             frame: NSRect(origin: .zero, size: frameRect.size),
-            configuration: gated,
-            agentFleetEnabled: agentFleetEnabled,
+            configuration: configuration,
             topInsetFraction: Self.menuBarTopInsetFraction(forFrame: frameRect)
         )
 
@@ -109,8 +103,8 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
     private func makeRuntimeOptions() -> MonitorRuntimeOptions {
         let kinds = Set(configuration.widgets.map(\.kind))
-        let wantsAgents = agentFleetEnabled && kinds.contains(.fleet)
-        let wantsUsage = agentFleetEnabled && kinds.contains(.usage)
+        let wantsAgents = kinds.contains(.fleet)
+        let wantsUsage = kinds.contains(.usage)
         let wantsProcesses = kinds.contains(.processes)
         // Roots stay nil here: the runtime resolves the security-scoped grants
         // itself so scope lifetime matches pipeline (not view) lifetime.
@@ -133,11 +127,10 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     /// Production entry for edits committed by the live board.
     func acceptBoardConfigurationEdit(_ edited: MonitorBoardConfiguration) {
         guard !isCleaningUp else { return }
-        let gated = Self.gatedConfiguration(edited, agentFleetEnabled: agentFleetEnabled)
-        configuration = gated
+        configuration = edited
         refreshRuntimeOptions()
         restartPumpCadence()
-        onConfigurationEdited?(gated)
+        onConfigurationEdited?(edited)
     }
 
     func waitUntilRuntimeSettled() async {
@@ -152,12 +145,11 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
 
     /// Apply a new board configuration in place (no view rebuild).
     func apply(configuration newConfiguration: MonitorBoardConfiguration) {
-        let gated = Self.gatedConfiguration(newConfiguration, agentFleetEnabled: agentFleetEnabled)
         // Avoid rebuilding the host when a persisted board edit is already visible.
-        guard gated != configuration else { return }
-        configuration = gated
-        boardHost.apply(configuration: gated)
-        let interactive = isEditing ? true : gated.mouseInteractionEnabled
+        guard newConfiguration != configuration else { return }
+        configuration = newConfiguration
+        boardHost.apply(configuration: newConfiguration)
+        let interactive = isEditing ? true : newConfiguration.mouseInteractionEnabled
         setMouseInteractionEnabled(interactive)
         (window as? VideoWallpaperWindow)?.setWallpaperMouseInteractionEnabled(interactive)
         refreshRuntimeOptions()
@@ -316,17 +308,4 @@ final class MonitorWallpaperView: NSView, WallpaperPerformanceConfigurable, Wall
     }
 
     // MARK: - Agent gate
-
-    /// Strip AI-agent placements (fleet / usage) when the Pro `.agentFleet` capability is not unlocked, so a Lite user (or a persisted Pro config opened under Lite) can never surface locked widgets.
-    static func gatedConfiguration(
-        _ configuration: MonitorBoardConfiguration,
-        agentFleetEnabled: Bool
-    ) -> MonitorBoardConfiguration {
-        guard !agentFleetEnabled else { return configuration }
-        let kept = configuration.widgets.filter { !$0.kind.requiresAgentFleet }
-        guard kept.count != configuration.widgets.count else { return configuration }
-        var gated = configuration
-        gated.widgets = kept
-        return gated
-    }
 }

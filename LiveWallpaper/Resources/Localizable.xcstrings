@@ -28078,36 +28078,6 @@
         }
       }
     },
-    "PRO" : {
-      "comment" : "Monitor board: Pro-only badge.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "PRO"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "PRO"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "PRO"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "PRO"
-          }
-        }
-      }
-    },
     "Proceed to choose your first wallpaper" : {
       "localizations" : {
         "en" : {

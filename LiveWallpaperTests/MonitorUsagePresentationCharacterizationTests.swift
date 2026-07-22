@@ -239,7 +239,6 @@ struct MonitorUsagePresentationCharacterizationTests {
             history: history,
             placement: placement,
             isEditing: false,
-            isAgentFleetEnabled: true,
             reduceMotion: true,
             now: Date(timeIntervalSince1970: 10_000)
         )

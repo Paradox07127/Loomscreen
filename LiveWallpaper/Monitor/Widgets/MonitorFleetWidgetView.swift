@@ -6,7 +6,7 @@ struct MonitorFleetWidgetView: View {
 
     private var reduceMotion: Bool { context.reduceMotion }
 
-    /// Sessions the module actually has, or nil when the AI-Fleet module is off.
+    /// Sessions the module has, or nil when the runtime is not sampling agents (no fleet widget placed).
     private var sessions: [MonitorAgentSessionState]? { context.snapshot.agents }
 
     /// Per-placement tuning bag (read-only here; the settings popover writes it).
@@ -1181,7 +1181,6 @@ private extension MonitorWidgetContext {
             history: MonitorHistorySnapshot(),
             placement: MonitorWidgetPlacement(kind: .fleet, size: size),
             isEditing: false,
-            isAgentFleetEnabled: true,
             reduceMotion: false,
             now: Date(timeIntervalSince1970: now)
         )
@@ -1195,7 +1194,7 @@ private extension MonitorWidgetContext {
         return MonitorWidgetContext(
             snapshot: snapshot, history: MonitorHistorySnapshot(),
             placement: MonitorWidgetPlacement(kind: .fleet, size: size),
-            isEditing: false, isAgentFleetEnabled: true, reduceMotion: false,
+            isEditing: false, reduceMotion: false,
             now: Date())
     }
 }

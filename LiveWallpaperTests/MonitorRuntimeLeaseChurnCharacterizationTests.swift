@@ -205,7 +205,6 @@ struct MonitorRuntimeLeaseChurnCharacterizationTests {
         let view = MonitorWallpaperView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 600),
             configuration: MonitorBoardConfiguration(widgets: []),
-            agentFleetEnabled: true,
             runtime: runtime
         )
         await view.waitUntilRuntimeSettled()
@@ -328,8 +327,7 @@ struct MonitorRuntimeLeaseChurnCharacterizationTests {
         controller.apply(
             overlay: overlay,
             screenID: screenID,
-            screenFrame: NSRect(x: 0, y: 0, width: 800, height: 600),
-            agentFleetEnabled: false
+            screenFrame: NSRect(x: 0, y: 0, width: 800, height: 600)
         )
         await controller.waitUntilRuntimeSettled()
         #expect(await runtime.debugActiveLeaseCount == 1)

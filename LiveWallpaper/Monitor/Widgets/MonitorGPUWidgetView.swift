@@ -808,7 +808,6 @@ private func gpuPreviewContext(
         history: history,
         placement: MonitorWidgetPlacement(kind: .gpu, size: size, options: options),
         isEditing: false,
-        isAgentFleetEnabled: false,
         reduceMotion: false,
         now: now
     )

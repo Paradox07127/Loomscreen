@@ -399,16 +399,6 @@ struct MonitorBoardConfigurationTests {
         #expect(MonitorBoardConfiguration.packedPlacements(for: []).isEmpty)
     }
 
-    // MARK: - requiresAgentFleet
-
-    @Test("requiresAgentFleet is true exactly for usage and fleet")
-    func requiresAgentFleetExactSet() {
-        let expectedTrue: Set<MonitorWidgetKind> = [.usage, .fleet]
-        for kind in MonitorWidgetKind.allCases {
-            #expect(kind.requiresAgentFleet == expectedTrue.contains(kind), "\(kind)")
-        }
-    }
-
     // MARK: - decodeIfPresent: board decode boundary
 
     /// Drives `MonitorBoardConfiguration.decodeIfPresent` from a nested `config`

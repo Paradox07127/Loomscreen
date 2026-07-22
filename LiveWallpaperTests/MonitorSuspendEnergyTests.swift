@@ -182,7 +182,6 @@ struct MonitorSuspendEnergyTests {
                 widgets: [MonitorWidgetPlacement(kind: .network, size: .small)],
                 refreshHz: 1
             ),
-            agentFleetEnabled: false,
             runtime: runtime
         )
         defer { view.cleanup() }
@@ -212,8 +211,7 @@ struct MonitorSuspendEnergyTests {
     func boardHostCarriesSuspendFlag() {
         let host = MonitorBoardHostView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 600),
-            configuration: MonitorBoardConfiguration(widgets: [], reduceMotionOverride: false),
-            agentFleetEnabled: false
+            configuration: MonitorBoardConfiguration(widgets: [], reduceMotionOverride: false)
         )
         #expect(host.isSuspended == false)
 

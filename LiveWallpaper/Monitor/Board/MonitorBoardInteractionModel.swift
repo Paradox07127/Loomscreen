@@ -58,9 +58,6 @@ final class MonitorBoardInteractionModel: ObservableObject {
     /// Real display width in points the board represents.
     var referenceWidth: CGFloat = 0
 
-    /// Whether AI-agent widget kinds are offered in the catalog (Pro gate).
-    let isAgentFleetEnabled: Bool
-
     /// Fired with a persistence-ready configuration after a committing edit (drag-end, add, remove, resize) — never per mouse-move.
     var onConfigurationEdited: ((MonitorBoardConfiguration) -> Void)?
 
@@ -69,10 +66,9 @@ final class MonitorBoardInteractionModel: ObservableObject {
 
     private var baseConfiguration: MonitorBoardConfiguration
 
-    init(configuration: MonitorBoardConfiguration, isAgentFleetEnabled: Bool) {
+    init(configuration: MonitorBoardConfiguration) {
         self.baseConfiguration = configuration
         self.placements = configuration.widgets
-        self.isAgentFleetEnabled = isAgentFleetEnabled
     }
 
     var geometry: MonitorBoardGeometry {
@@ -83,11 +79,7 @@ final class MonitorBoardInteractionModel: ObservableObject {
         )
     }
 
-    /// Kinds offered in the add catalog: all cases, minus agent-fleet kinds when
-    /// that feature is locked.
-    var catalogKinds: [MonitorWidgetKind] {
-        MonitorWidgetKind.allCases.filter { isAgentFleetEnabled || !$0.requiresAgentFleet }
-    }
+    var catalogKinds: [MonitorWidgetKind] { MonitorWidgetKind.allCases }
 
     // MARK: - External config application
 
@@ -309,11 +301,10 @@ final class MonitorBoardInteractionModel: ObservableObject {
     }
 
     /// Add a widget of `kind` at its first-fit free position. No-op (returns
-    /// false) if the board is full or the kind is gated off.
+    /// false) if the board is full.
     @discardableResult
     func addWidget(kind: MonitorWidgetKind) -> Bool {
         guard isEditing else { return false }
-        guard isAgentFleetEnabled || !kind.requiresAgentFleet else { return false }
         let size = Self.defaultSize(for: kind)
         let footprintSize = geometry.pixelSize(for: kind, size: size)
         guard let origin = MonitorBoardLayoutEngine.firstFit(

@@ -262,12 +262,6 @@ struct MonitorCatalogView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Color.white.opacity(0.85))
                     Spacer(minLength: 0)
-                    if kind.requiresAgentFleet {
-                        Text(MonitorBoardStrings.proBadge)
-                            .font(.system(size: 9, weight: .bold))
-                            .tracking(0.6)
-                            .foregroundStyle(Color(red: 0.85, green: 0.7, blue: 0.35))
-                    }
                 }
                 Text(verbatim: kind.allowedSizes.map { $0.rawValue.uppercased() }.joined(separator: " · "))
                     .font(.system(size: 9, weight: .medium))
@@ -394,7 +388,6 @@ enum MonitorBoardStrings {
     static var moveDown: LocalizedStringKey { "Move Down" }
     static var widgetSettings: LocalizedStringKey { "Widget Settings" }
     static var widgetCatalog: LocalizedStringKey { "Widget Catalog" }
-    static var proBadge: LocalizedStringKey { "PRO" }
     static var boardFull: LocalizedStringKey { "Board full — no free space" }
     static var editLayout: LocalizedStringKey { "Edit Layout" }
     static var doneEditing: LocalizedStringKey { "Done" }

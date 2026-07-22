@@ -44,12 +44,10 @@ struct ProductCapabilitiesTests {
         #expect(!catalog.canRender(.scene))
     }
 
-    @Test("agentFleet is Pro-only; monitorWallpaper is in both SKUs")
-    func agentFleetIsProOnly() {
+    @Test("monitorWallpaper — AI-agent modules included — is in both SKUs")
+    func monitorWallpaperIsInBothSKUs() {
         #expect(ProductCapabilities.lite.enabledFeatures.contains(.monitorWallpaper))
-        #expect(!ProductCapabilities.lite.enabledFeatures.contains(.agentFleet))
         #expect(ProductCapabilities.pro.enabledFeatures.contains(.monitorWallpaper))
-        #expect(ProductCapabilities.pro.enabledFeatures.contains(.agentFleet))
     }
 
     @Test("Pro catalog renders every wallpaper type")
@@ -111,7 +109,6 @@ struct ProductCapabilitiesTests {
         #expect(lite.isEnabled(.scheduleAutomation))
         #expect(lite.isEnabled(.systemMonitor))
         #expect(lite.isEnabled(.monitorWallpaper))
-        #expect(!lite.isEnabled(.agentFleet))
         #expect(!lite.isEnabled(.scene))
         #expect(!lite.isEnabled(.metalShader))
         #expect(!lite.isEnabled(.developerTools))
@@ -121,7 +118,6 @@ struct ProductCapabilitiesTests {
         #expect(pro.isEnabled(.scheduleAutomation))
         #expect(pro.isEnabled(.systemMonitor))
         #expect(pro.isEnabled(.monitorWallpaper))
-        #expect(pro.isEnabled(.agentFleet))
         #expect(!pro.isEnabled(.developerTools))
 
         let localPro = FeatureCatalog(capabilities: .pro.withLocalDeveloperTools())

@@ -5,13 +5,8 @@ import SwiftUI
 struct MonitorBoardPreviewArea: View {
     let screen: Screen
     let screenManager: ScreenManager
-    let featureCatalog: FeatureCatalog
 
     @State private var board: MonitorBoardConfiguration = .default
-
-    private var agentFleetEnabled: Bool {
-        featureCatalog.isEnabled(.agentFleet)
-    }
 
     /// The display's aspect ratio.
     private var screenAspect: CGFloat {
@@ -33,7 +28,6 @@ struct MonitorBoardPreviewArea: View {
             let fitted = Self.fittedSize(in: geo.size, aspect: screenAspect)
             MonitorBoardPreview(
                 configuration: board,
-                agentFleetEnabled: agentFleetEnabled,
                 topInsetFraction: topInsetFraction,
                 referenceWidth: max(screen.frame.width, 1),
                 onConfigurationEdited: { edited in
@@ -85,7 +79,6 @@ struct MonitorBoardPreviewArea: View {
 
 struct MonitorBoardPreview: NSViewRepresentable {
     let configuration: MonitorBoardConfiguration
-    let agentFleetEnabled: Bool
     /// Menu-bar forbidden-zone fraction, WYSIWYG with the real display.
     let topInsetFraction: CGFloat
     /// Real display width in points — the preview board scales Apple-size
@@ -98,13 +91,9 @@ struct MonitorBoardPreview: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> MonitorBoardHostView {
-        let gated = MonitorWallpaperView.gatedConfiguration(
-            configuration, agentFleetEnabled: agentFleetEnabled
-        )
         let host = MonitorBoardHostView(
             frame: NSRect(x: 0, y: 0, width: 480, height: 168),
-            configuration: gated,
-            agentFleetEnabled: agentFleetEnabled,
+            configuration: configuration,
             nameOnlyTiles: true,
             topInsetFraction: topInsetFraction,
             referenceWidth: referenceWidth
@@ -121,17 +110,14 @@ struct MonitorBoardPreview: NSViewRepresentable {
 
     func updateNSView(_ host: MonitorBoardHostView, context: Context) {
         host.onConfigurationEdited = onConfigurationEdited
-        let gated = MonitorWallpaperView.gatedConfiguration(
-            configuration, agentFleetEnabled: agentFleetEnabled
-        )
-        let needsApply = context.coordinator.lastAppliedConfiguration != gated
-        if needsApply { context.coordinator.lastAppliedConfiguration = gated }
+        let needsApply = context.coordinator.lastAppliedConfiguration != configuration
+        if needsApply { context.coordinator.lastAppliedConfiguration = configuration }
         let referenceWidth = referenceWidth
         let topInsetFraction = topInsetFraction
         Task { @MainActor in
             host.setReferenceWidth(referenceWidth)
             if needsApply {
-                host.apply(configuration: gated, topInsetFraction: topInsetFraction)
+                host.apply(configuration: configuration, topInsetFraction: topInsetFraction)
             }
             host.setEditing(true)
             host.setMouseInteractionEnabled(true)

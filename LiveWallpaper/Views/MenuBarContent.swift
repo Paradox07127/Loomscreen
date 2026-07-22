@@ -51,10 +51,8 @@ struct MenuBarContent: View {
                     sectionDivider
                     monitorOverlaySection
                 }
-                if featureCatalog.isEnabled(.agentFleet) {
-                    sectionDivider
-                    fleetHUDRow
-                }
+                sectionDivider
+                fleetHUDRow
                 sectionDivider
                 footer
             }

@@ -972,7 +972,6 @@ private extension MonitorWidgetContext {
             history: history,
             placement: placement,
             isEditing: false,
-            isAgentFleetEnabled: false,
             reduceMotion: false,
             now: Date()
         )
