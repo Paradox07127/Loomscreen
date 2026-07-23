@@ -23,6 +23,7 @@ esac
 
 BUILD_SETTINGS_LOG="$(mktemp -t livewallpaper-release-build-settings.XXXXXX)"
 MATRIX_BUILD_LOG="$(mktemp -t livewallpaper-link-matrix.XXXXXX)"
+APP_TEST_RESULT_BUNDLE="${APP_TEST_RESULT_BUNDLE:-/tmp/LiveWallpaperReleaseCandidateTests-$$.xcresult}"
 trap 'rm -f "$BUILD_SETTINGS_LOG" "$MATRIX_BUILD_LOG"' EXIT
 
 fail_with_log() {
@@ -143,25 +144,30 @@ echo "== Swift package tests (sequential) =="
 for package_path in "${PACKAGE_TEST_PATHS[@]}"; do
   package_name="${package_path##*/}"
   package_scratch="$DERIVED_DATA/SwiftPM/$package_name"
+  package_log="/tmp/LiveWallpaperReleaseCandidate-${package_name}-$$.log"
   echo "-- $package_name --"
   if ! swift test \
     --package-path "$package_path" \
-    --scratch-path "$package_scratch"; then
+    --scratch-path "$package_scratch" \
+    > "$package_log" 2>&1; then
     echo "ERROR: $package_name tests failed; app scheme checks were not started." >&2
+    tail -80 "$package_log" >&2
     exit 1
   fi
+  package_summary="$(grep -E 'Test run with [1-9][0-9]* tests?' "$package_log" | tail -1 || true)"
+  if [[ -z "$package_summary" ]]; then
+    echo "ERROR: $package_name reported success without a non-zero test summary." >&2
+    tail -80 "$package_log" >&2
+    exit 1
+  fi
+  echo "$package_summary"
+  echo "Raw log: $package_log"
 done
 
 echo "== Unit tests (Pro scheme) =="
-xcodebuild test \
-  -project LiveWallpaper.xcodeproj \
-  -scheme LiveWallpaper \
-  -configuration Debug \
-  -destination "$MACOS_DESTINATION" \
-  -derivedDataPath "$DERIVED_DATA" \
-  -enableCodeCoverage NO \
-  -only-testing:LiveWallpaperTests \
-  SWIFT_EMIT_LOC_STRINGS=NO
+DERIVED_DATA="$DERIVED_DATA" \
+RESULT_BUNDLE="$APP_TEST_RESULT_BUNDLE" \
+scripts/app_tests.sh full
 
 # Cover Pro and Lite Debug/Release links with isolated build databases.
 # Developer ID entitlements and notarization remain a separate signing-machine gate.

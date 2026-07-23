@@ -127,6 +127,9 @@ LiveWallpaperTests/Fixtures/*
 scripts/*
 !scripts/release_candidate_check.sh
 !scripts/fast_app_contract_tests.sh
+!scripts/app_tests.sh
+!scripts/xcode_test_runner.py
+!scripts/xcode_test_runner_self_test.py
 !scripts/release_contract_check.sh
 !scripts/release-app.sh
 !scripts/check_entitlements.sh

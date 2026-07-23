@@ -10,6 +10,15 @@ RESULT_BUNDLE="${RESULT_BUNDLE:-/tmp/LiveWallpaperFastAppContracts-$$.xcresult}"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
+usage() {
+  cat <<'EOF'
+Usage: scripts/fast_app_contract_tests.sh [--without-building|--list]
+
+Runs the hardware-free architecture/security suites with concise xcresult
+reporting. --without-building reuses products in DERIVED_DATA.
+EOF
+}
+
 SUITES=(
   GeneralSettingsOwnershipCharacterizationTests
   InfrastructureRuntimeBoundaryTests
@@ -42,14 +51,18 @@ SUITES=(
   WorkshopInstalledOwnershipCharacterizationTests
 )
 
+action="test"
 case "${1:-}" in
   "") ;;
+  --without-building)
+    action="test-without-building"
+    ;;
   --list)
     printf '%s\n' "${SUITES[@]}"
     exit 0
     ;;
   -h|--help)
-    sed -n '2,8p' "$0"
+    usage
     exit 0
     ;;
   *)
@@ -64,37 +77,26 @@ for suite in "${SUITES[@]}"; do
 done
 
 echo "== Fast app architecture/security contracts (${#SUITES[@]} suites) =="
-xcodebuild test \
+required_suites=()
+for suite in "${SUITES[@]}"; do
+  required_suites+=("--require-suite" "$suite")
+done
+
+python3 scripts/xcode_test_runner.py \
+  --label "Fast app architecture/security contracts" \
+  --result-bundle "$RESULT_BUNDLE" \
+  --minimum-test-count 1 \
+  --slowest 10 \
+  "${required_suites[@]}" \
+  -- \
   -project LiveWallpaper.xcodeproj \
   -scheme LiveWallpaper \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$DERIVED_DATA" \
-  -resultBundlePath "$RESULT_BUNDLE" \
   -enableCodeCoverage NO \
   -parallel-testing-enabled NO \
   "${only_testing[@]}" \
+  "$action" \
   CODE_SIGN_IDENTITY=- \
   CODE_SIGN_STYLE=Manual \
   SWIFT_EMIT_LOC_STRINGS=NO
-
-# xcodebuild treats an unknown -only-testing suite as a successful zero-test
-# selection. Assert each requested Swift Testing suite actually appears in the
-# xcresult so a rename/removal cannot silently weaken the required PR gate.
-RESULT_JSON="${RESULT_BUNDLE%.xcresult}.json"
-xcrun xcresulttool get test-results tests \
-  --path "$RESULT_BUNDLE" \
-  --format json \
-  > "$RESULT_JSON"
-
-missing_suites=()
-for suite in "${SUITES[@]}"; do
-  if ! grep -Fq "/${suite}\"" "$RESULT_JSON"; then
-    missing_suites+=("$suite")
-  fi
-done
-if [[ ${#missing_suites[@]} -ne 0 ]]; then
-  echo "ERROR: requested suites absent from xcresult: ${missing_suites[*]}" >&2
-  exit 1
-fi
-
-echo "Verified all ${#SUITES[@]} requested suites in $RESULT_BUNDLE"

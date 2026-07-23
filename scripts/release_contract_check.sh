@@ -11,22 +11,37 @@ bash -n \
   scripts/check_entitlements_self_test.sh \
   scripts/release_candidate_check.sh \
   scripts/release_contract_check.sh \
+  scripts/app_tests.sh \
   scripts/fast_app_contract_tests.sh
 
 bash scripts/release-app.sh --help >/dev/null
 bash scripts/check_entitlements.sh --help >/dev/null
 python3 scripts/entitlement_fingerprint.py --help >/dev/null
+bash scripts/app_tests.sh --help >/dev/null
 bash scripts/fast_app_contract_tests.sh --list >/dev/null
+python3 scripts/xcode_test_runner_self_test.py
 bash scripts/check_entitlements.sh --sku pro --source
 bash scripts/check_entitlements.sh --sku lite --source
 bash scripts/check_entitlements_self_test.sh
 
-pro_test_block="$(sed -n '/^xcodebuild test \\/,/^$/p' scripts/release_candidate_check.sh)"
-grep -q -- '-only-testing:LiveWallpaperTests' <<<"$pro_test_block"
-grep -q -- '-configuration Debug' <<<"$pro_test_block"
-grep -q -- '-destination "$MACOS_DESTINATION"' <<<"$pro_test_block"
-grep -q -- '-enableCodeCoverage NO' <<<"$pro_test_block"
-grep -q 'SWIFT_EMIT_LOC_STRINGS=NO' <<<"$pro_test_block"
+app_test_script="scripts/app_tests.sh"
+grep -Fq 'scripts/app_tests.sh full' scripts/release_candidate_check.sh
+grep -Fq 'minimum_test_count=2400' "$app_test_script"
+grep -Fq -- '-only-testing:LiveWallpaperTests/$suite' "$app_test_script"
+grep -Fq -- '-configuration Debug' "$app_test_script"
+grep -Fq -- "-destination 'platform=macOS,arch=arm64'" "$app_test_script"
+grep -Fq -- '-enableCodeCoverage NO' "$app_test_script"
+grep -Fq 'SWIFT_EMIT_LOC_STRINGS=NO' "$app_test_script"
+grep -Fq 'test-without-building' "$app_test_script"
+full_test_command="$(scripts/app_tests.sh full --dry-run)"
+targeted_test_command="$(scripts/app_tests.sh suites ContractProbeSuite --dry-run)"
+grep -Fq -- ' test ' <<<"$full_test_command"
+if grep -Fq -- '-only-testing:' <<<"$full_test_command"; then
+  echo "ERROR: full app-test mode unexpectedly filters the test target." >&2
+  exit 1
+fi
+grep -Fq -- '-only-testing:LiveWallpaperTests/ContractProbeSuite' <<<"$targeted_test_command"
+grep -Fq -- '--require-suite ContractProbeSuite' <<<"$targeted_test_command"
 
 candidate_script="scripts/release_candidate_check.sh"
 grep -Fq 'MACOS_DESTINATION="platform=macOS,arch=arm64"' "$candidate_script"
