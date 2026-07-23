@@ -1971,9 +1971,6 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
     private let evaluationBudget: TimeInterval
     private let governor: WPESceneScriptExecutionGovernor
     private let participant: WPESceneScriptExecutionGovernor.Participant
-    /// Test-only route seam for signed-host parity runs. Shipping call sites use
-    /// the nil default and therefore retain the bundle-integrity routing below.
-    private let testingExecutionRoute: StaticTransformExecutionRoute?
     private let queue = DispatchQueue(
         label: "com.livewallpaper.wpe-transform-evaluator",
         qos: .userInitiated
@@ -2024,14 +2021,23 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
         canvasWidth: Double,
         canvasHeight: Double,
         evaluationBudget: TimeInterval = 0.5,
-        governor: WPESceneScriptExecutionGovernor = .processShared,
-        testingExecutionRoute: StaticTransformExecutionRoute? = nil
+        governor: WPESceneScriptExecutionGovernor = .processShared
     ) {
         self.canvasSize = SIMD2<Double>(canvasWidth, canvasHeight)
         self.evaluationBudget = evaluationBudget
         self.governor = governor
         self.participant = governor.makeParticipant()
-        self.testingExecutionRoute = testingExecutionRoute
+    }
+
+    /// Unresolved origins are not a degraded render but a WRONG one — scripted
+    /// objects fall back to the authored seed, which a scene's text objects
+    /// typically share, so they pile onto one origin. That went undiagnosed for
+    /// several rounds because nothing on this path logged in Release.
+    static func reportKeptBakedOrigins(count: Int, reason: String) {
+        Logger.warning(
+            "Static transform scripts unresolved (\(reason)) — \(count) object(s) keep their baked origin; scripted layout will be wrong",
+            category: .wpeRender
+        )
     }
 
     /// Heuristics live with the package parser so bake-time and runtime agree.
@@ -2057,109 +2063,37 @@ final class WPETransformScriptEvaluator: @unchecked Sendable {
         ]).first ?? nil
     }
 
-    enum StaticTransformExecutionRoute: Equatable {
-        case helperService
-        case keepBakedFailClosed
-        case inProcess
-    }
-
-    /// An application bundle must embed its Pro helper; test runners and CLI
-    /// tools are not `.app`s.
-    static var hostIsApplicationBundle: Bool {
-        Bundle.main.bundleURL.pathExtension == "app"
-    }
-
-    /// Where a statically-resolvable batch runs. The embedded helper is the only
-    /// place a shipping app evaluates untrusted community JavaScript. When a real
-    /// `.app` reports the helper missing (a tampered or incomplete bundle) we fail
-    /// closed and keep baked origins rather than fall back to in-process
-    /// execution. Non-app hosts ship without the helper by design and may
-    /// evaluate in-process, where the local watchdog + quarantine still guard.
-    static func executionRoute(
-        embeddedServiceAvailable: Bool,
-        hostIsApplicationBundle: Bool
-    ) -> StaticTransformExecutionRoute {
-        if embeddedServiceAvailable { return .helperService }
-        return hostIsApplicationBundle ? .keepBakedFailClosed : .inProcess
-    }
-
-    /// Phase-one hard-isolation slice: static parse-time transforms form a pure
-    /// document-scoped batch, so they can cross XPC without serializing renderer
-    /// objects or live SceneScript state. A worker failure keeps every baked
-    /// origin. The local path remains only for hosts that do not embed the Pro
-    /// service (package tests and source-level tools), never as a shipping crash
-    /// fallback that would re-run hostile code in the app process.
+    /// Static parse-time origins evaluate in-process, like every other SceneScript
+    /// path (text, layer, and dynamic-transform scripts all use a local JSContext).
+    /// A dedicated XPC helper ran only this one batch until 2026-07-23: a corpus
+    /// audit showed it isolated 101 provably-inert scripts while the 6 that build
+    /// code dynamically were pushed in-process by the very blocklist gating this
+    /// path, so it bought no containment and cost a whole class of cold-start
+    /// timeout failures. `resolveVec3InProcess` keeps the watchdog + quarantine.
     func resolveBatch(
         _ requests: [WPESceneTransformScriptRequest]
     ) -> [SIMD3<Double>?] {
         guard !isPoisoned, !requests.isEmpty else {
             return Array(repeating: nil, count: requests.count)
         }
-        let eligibleIndices = requests.indices.filter {
-            Self.isStaticallyResolvable(requests[$0].script)
-        }
-        guard !eligibleIndices.isEmpty else {
-            return Array(repeating: nil, count: requests.count)
-        }
-        let eligibleRequests = eligibleIndices.map { requests[$0] }
-
-        let route = testingExecutionRoute ?? Self.executionRoute(
-            embeddedServiceAvailable: WPESceneScriptXPCClient.shared.isEmbeddedServiceAvailable,
-            hostIsApplicationBundle: Self.hostIsApplicationBundle
-        )
-        switch route {
-        case .helperService:
-            // Preserve the existing process-wide SceneScript admission
-            // contract even though JavaScript now executes in the helper. A
-            // saturated renderer must reject this batch before dispatching any
-            // XPC work, and the permit bounds host+worker workload together.
-            let deadline = DispatchTime.now() + max(evaluationBudget, 0)
-            guard let permit = governor.acquire(for: participant, until: deadline) else {
-                return Array(repeating: nil, count: requests.count)
-            }
-            defer { permit.release() }
-            let now = DispatchTime.now()
-            guard now < deadline else {
-                return Array(repeating: nil, count: requests.count)
-            }
-            let remainingEvaluationBudget = TimeInterval(
-                Double(deadline.uptimeNanoseconds - now.uptimeNanoseconds)
-                    / 1_000_000_000
+        var unresolved = 0
+        let outputs = requests.map { request -> SIMD3<Double>? in
+            guard Self.isStaticallyResolvable(request.script) else { return nil }
+            let value = resolveVec3InProcess(
+                script: request.script,
+                properties: request.properties,
+                seed: request.seed
             )
-            switch WPESceneScriptXPCClient.shared.evaluateStaticTransforms(
-                canvasWidth: canvasSize.x,
-                canvasHeight: canvasSize.y,
-                requests: eligibleRequests,
-                evaluationBudget: remainingEvaluationBudget
-            ) {
-            case .completed(let completion):
-                var outputs = Array<SIMD3<Double>?>(repeating: nil, count: requests.count)
-                for (index, value) in zip(eligibleIndices, completion.values) {
-                    outputs[index] = value
-                }
-                return outputs
-            case .rejected:
-                return Array(repeating: nil, count: requests.count)
-            case .transportFailure:
-                poison()
-                return Array(repeating: nil, count: requests.count)
-            }
-
-        case .keepBakedFailClosed:
-            // A shipping .app always embeds its Pro helper; its absence means a
-            // tampered or incomplete bundle. Never re-run untrusted community JS
-            // in the app process — keep every baked origin instead.
-            return Array(repeating: nil, count: requests.count)
-
-        case .inProcess:
-            return requests.map {
-                resolveVec3InProcess(
-                    script: $0.script,
-                    properties: $0.properties,
-                    seed: $0.seed
-                )
-            }
+            if value == nil { unresolved += 1 }
+            return value
         }
+        if unresolved > 0 {
+            Self.reportKeptBakedOrigins(
+                count: unresolved,
+                reason: "script evaluation failed, was refused capacity, or overran its budget"
+            )
+        }
+        return outputs
     }
 
     private func resolveVec3InProcess(

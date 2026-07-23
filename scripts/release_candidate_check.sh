@@ -72,31 +72,6 @@ assert_arm64_binary() {
   fi
 }
 
-assert_exact_xpc_sandbox_entitlements() {
-  local service="$1"
-  local entitlements fingerprint
-  entitlements="$(mktemp -t livewallpaper-xpc-entitlements.XXXXXX)"
-  if ! codesign -d --entitlements - --xml "$service" > "$entitlements" 2>/dev/null; then
-    rm -f "$entitlements"
-    echo "ERROR: Could not read SceneScript XPC entitlements from $service." >&2
-    exit 1
-  fi
-  if ! plutil -lint "$entitlements" >/dev/null; then
-    rm -f "$entitlements"
-    echo "ERROR: SceneScript XPC service has no valid embedded entitlement plist." >&2
-    exit 1
-  fi
-  if ! fingerprint="$(python3 scripts/entitlement_fingerprint.py fingerprint "$entitlements")"; then
-    rm -f "$entitlements"
-    exit 1
-  fi
-  rm -f "$entitlements"
-  if [[ "$fingerprint" != $'bool\tcom.apple.security.app-sandbox\ttrue' ]]; then
-    echo "ERROR: SceneScript XPC service entitlements must be exactly App Sandbox." >&2
-    printf '%s\n' "$fingerprint" >&2
-    exit 1
-  fi
-}
 
 echo "== Entitlement source baseline =="
 scripts/check_entitlements.sh --sku pro --source
@@ -201,10 +176,6 @@ assert_arm64_binary "$PRO_RELEASE_BIN" "Pro Release archive"
 codesign --verify --deep --strict --verbose=2 "$PRO_ARCHIVED_APP"
 assert_no_removed_dynamic_links "$PRO_RELEASE_BIN" "Pro Release archive"
 
-PRO_XPC_SERVICE="$PRO_ARCHIVED_APP/Contents/XPCServices/SceneScriptXPCService.xpc"
-[[ -d "$PRO_XPC_SERVICE" ]] || fail_with_log "Pro Release archive did not embed SceneScriptXPCService.xpc."
-codesign --verify --strict --verbose=2 "$PRO_XPC_SERVICE"
-assert_exact_xpc_sandbox_entitlements "$PRO_XPC_SERVICE"
 
 DERIVED_DATA_LITE_DEBUG="${DERIVED_DATA}LiteDebug"
 echo "== Link matrix: Lite Debug =="
@@ -249,8 +220,8 @@ assert_no_removed_dynamic_links "$LITE_RELEASE_BIN" "Lite Release archive"
 
 # Lite must remain free of Pro renderer and SceneScript components.
 for lite_binary in "$LITE_DEBUG_BIN" "$LITE_RELEASE_BIN"; do
-  if nm "$lite_binary" 2>/dev/null | grep -Eq 'WPEMetalSceneRenderer|WPEMetalRenderExecutor|WPESceneScriptXPC'; then
-    echo "ERROR: Lite binary contains a Pro-only renderer/XPC symbol." >&2
+  if nm "$lite_binary" 2>/dev/null | grep -Eq 'WPEMetalSceneRenderer|WPEMetalRenderExecutor'; then
+    echo "ERROR: Lite binary contains a Pro-only renderer symbol." >&2
     exit 1
   fi
   if otool -L "$lite_binary" | grep -q 'JavaScriptCore'; then
@@ -258,11 +229,15 @@ for lite_binary in "$LITE_DEBUG_BIN" "$LITE_RELEASE_BIN"; do
     exit 1
   fi
 done
-if [[ -d "$LITE_ARCHIVED_APP/Contents/XPCServices" ]]; then
-  echo "ERROR: Lite Release archive unexpectedly embeds an XPC service." >&2
-  exit 1
-fi
-echo "  ✓ Pro/Lite Debug/Release links, Pro XPC isolation, and Lite archive purity verified"
+# The SceneScript helper was retired 2026-07-23 (it isolated only provably-inert
+# scripts while the dynamic ones ran in-process anyway); neither SKU ships one now.
+for archived_app in "$PRO_ARCHIVED_APP" "$LITE_ARCHIVED_APP"; do
+  if [[ -d "$archived_app/Contents/XPCServices" ]]; then
+    echo "ERROR: $archived_app unexpectedly embeds an XPC service." >&2
+    exit 1
+  fi
+done
+echo "  ✓ Pro/Lite Debug/Release links, no embedded XPC services, and Lite archive purity verified"
 
 echo "== Diff whitespace check =="
 git diff --check

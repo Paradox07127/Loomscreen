@@ -8,7 +8,6 @@ struct DeveloperToolsView: View {
     @State private var flagRefresh = 0
     @State private var captureIDs: [String] = UserDefaults.standard.stringArray(forKey: DeveloperToolsView.captureSceneKey) ?? []
     @State private var newCaptureID: String = ""
-    @State private var sceneScriptXPCDiagnosticsEnabled = WPESceneScriptXPCDiagnostics.isEnabled
     @State private var freezeTimeText: String = {
         if let value = UserDefaults.standard.object(forKey: DeveloperToolsView.oracleFreezeTimeKey) as? Double {
             return String(value)
@@ -87,8 +86,6 @@ struct DeveloperToolsView: View {
         for key in allDiagnosticDefaultsKeys {
             defaults.removeObject(forKey: key)
         }
-        WPESceneScriptXPCDiagnostics.setEnabled(false)
-        WPESceneScriptXPCDiagnostics.reset()
     }
 
     private var diagnosticsFlagsSection: some View {
@@ -122,9 +119,6 @@ struct DeveloperToolsView: View {
                 }
 
                 Divider()
-                sceneScriptXPCDiagnosticsControl
-
-                Divider()
                 gpuCaptureList
 
                 Text(verbatim: "Flags persist in UserDefaults until toggled off. \"Reset all\" clears every flag here (including scene-dump targets) so a forgotten toggle never affects normal playback.")
@@ -148,51 +142,9 @@ struct DeveloperToolsView: View {
 
     private func resetDiagnosticFlags() {
         Self.clearAllDiagnosticDefaults()
-        sceneScriptXPCDiagnosticsEnabled = false
         captureIDs = []
         freezeTimeText = ""
         flagRefresh += 1
-    }
-
-    private var sceneScriptXPCDiagnosticsControl: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle(isOn: Binding(
-                get: { sceneScriptXPCDiagnosticsEnabled },
-                set: { enabled in
-                    sceneScriptXPCDiagnosticsEnabled = enabled
-                    WPESceneScriptXPCDiagnostics.setEnabled(enabled)
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("SceneScript XPC measurements", comment: "Developer Tools toggle title enabling in-memory SceneScript XPC diagnostics.")
-                    Text("Keep the most recent helper attempts in memory while diagnosing timing or recovery. Nothing is written automatically; Copy JSON puts a redacted snapshot on the clipboard.", comment: "Developer Tools helper text explaining the opt-in, memory-only SceneScript XPC diagnostic recorder.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            HStack(spacing: 8) {
-                Button {
-                    WPESceneScriptXPCDiagnostics.reset()
-                    flagRefresh += 1
-                } label: {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
-                }
-                Button {
-                    copySceneScriptXPCDiagnostics()
-                } label: {
-                    Label("Copy XPC JSON", systemImage: "doc.on.clipboard")
-                }
-            }
-        }
-    }
-
-    private func copySceneScriptXPCDiagnostics() {
-        guard let data = try? WPESceneScriptXPCDiagnostics.encodedSnapshot(),
-              let text = String(data: data, encoding: .utf8) else {
-            return
-        }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func revealDebugArtifacts() {

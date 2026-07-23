@@ -8636,36 +8636,6 @@
         }
       }
     },
-    "Copy XPC JSON" : {
-      "comment" : "Developer Tools button label copying the redacted in-memory SceneScript XPC diagnostic snapshot to the clipboard.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Copy XPC JSON"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "XPC JSON をコピー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制 XPC JSON"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "複製 XPC JSON"
-          }
-        }
-      }
-    },
     "Copy all IDs" : {
       "localizations" : {
         "en" : {
@@ -19343,36 +19313,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此來源可執行 JavaScript。撤銷以停用腳本執行。"
-          }
-        }
-      }
-    },
-    "Keep the most recent helper attempts in memory while diagnosing timing or recovery. Nothing is written automatically; Copy JSON puts a redacted snapshot on the clipboard." : {
-      "comment" : "Developer Tools helper text explaining the opt-in, memory-only SceneScript XPC diagnostic recorder.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep the most recent helper attempts in memory while diagnosing timing or recovery. Nothing is written automatically; Copy JSON puts a redacted snapshot on the clipboard."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "タイミングや復旧を調査する間、直近のヘルパー試行をメモリ内に保持します。自動で書き出すことはなく、「JSON をコピー」を選ぶと匿名化済みスナップショットがクリップボードに入ります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "排查时序或恢复问题时，将最近的辅助进程尝试保留在内存中。不会自动写入；选择“复制 JSON”会将脱敏快照放到剪贴板。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "診斷時序或復原問題時，會將最近的輔助程序嘗試保留在記憶體中。不會自動寫入；選擇「複製 JSON」會將去識別化快照放到剪貼簿。"
           }
         }
       }
@@ -32817,36 +32757,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "場景"
-          }
-        }
-      }
-    },
-    "SceneScript XPC measurements" : {
-      "comment" : "Developer Tools toggle title enabling in-memory SceneScript XPC diagnostics.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SceneScript XPC measurements"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SceneScript XPC 計測"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SceneScript XPC 测量"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SceneScript XPC 測量"
           }
         }
       }

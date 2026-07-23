@@ -45,8 +45,6 @@ SUITES=(
   WPERendererOwnershipCharacterizationTests
   WPESceneScriptB2bResourceLimitTests
   WPESceneScriptContainmentCharacterizationTests
-  WPESceneScriptXPCCorpusParityTests
-  WPESceneScriptXPCContractTests
   WPEUploadCancellationOracleTests
   WorkshopInstalledOwnershipCharacterizationTests
 )

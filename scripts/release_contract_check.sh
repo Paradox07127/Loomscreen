@@ -65,10 +65,15 @@ grep -q -- '-archivePath "$PRO_ARCHIVE_PATH"' <<<"$pro_release_block"
 grep -q 'CODE_SIGN_IDENTITY="-"' <<<"$pro_release_block"
 grep -q 'ARCHS=arm64' <<<"$pro_release_block"
 grep -q 'SWIFT_EMIT_LOC_STRINGS=NO' <<<"$pro_release_block"
-grep -Fq 'PRO_XPC_SERVICE="$PRO_ARCHIVED_APP/Contents/XPCServices/SceneScriptXPCService.xpc"' "$candidate_script"
-grep -Fq 'codesign --verify --strict --verbose=2 "$PRO_XPC_SERVICE"' "$candidate_script"
-grep -Fq 'assert_exact_xpc_sandbox_entitlements "$PRO_XPC_SERVICE"' "$candidate_script"
-grep -Fq "SceneScript XPC service entitlements must be exactly App Sandbox." "$candidate_script"
+# The SceneScript XPC helper was retired 2026-07-23 (a corpus audit found it
+# isolated only provably-inert scripts while the dynamic ones ran in-process
+# anyway). The RC gate now asserts its ABSENCE from both archives, and the
+# project must not grow the target back.
+grep -Fq 'unexpectedly embeds an XPC service.' "$candidate_script"
+if grep -q 'SceneScriptXPC' "LiveWallpaper.xcodeproj/project.pbxproj"; then
+  echo "ERROR: the retired SceneScript XPC service reappeared in project.pbxproj." >&2
+  exit 1
+fi
 
 grep -q 'xcodebuild build' <<<"$lite_debug_block"
 grep -q -- '-scheme LiveWallpaperLite' <<<"$lite_debug_block"
@@ -108,13 +113,6 @@ project_file="LiveWallpaper.xcodeproj/project.pbxproj"
 [[ "$(grep -c 'CODE_SIGN_ENTITLEMENTS = LiveWallpaper/LiveWallpaper.entitlements;' "$project_file")" == "2" ]]
 [[ "$(grep -c 'CODE_SIGN_ENTITLEMENTS = LiveWallpaper/LiveWallpaperLite.entitlements;' "$project_file")" == "2" ]]
 
-# The Pro-only SceneScript helper receives only the App Sandbox entitlement.
-xpc_entitlements="SceneScriptXPCService/SceneScriptXPCService.entitlements"
-grep -q '<key>com.apple.security.app-sandbox</key>' "$xpc_entitlements"
-[[ "$(grep -c '<key>' "$xpc_entitlements")" == "1" ]]
-grep -Fq 'dstPath = "$(CONTENTS_FOLDER_PATH)/XPCServices";' "$project_file"
-grep -q 'SceneScriptXPCService.xpc' "$project_file"
-[[ "$(grep -c 'CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;' "$project_file")" == "1" ]]
 
 # Prevent removed dependencies from returning to release surfaces.
 if git grep -n -E \
